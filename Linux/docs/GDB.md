@@ -1,5 +1,3 @@
-[TOC]
-
 ## 安装并简单使用GDB
 
 ### 预备工作
@@ -105,21 +103,21 @@ clear	# 清屏
 ^L 		# 即 Ctrl + L 清屏
 ```
 
-> ###### 什么是 Core Dump ？
+> **什么是 Core Dump ？**
 >
 > Core Dump 指的是在程序发生严重错误时，操作系统将程序运行时的内存状态和其他相关信息保存到文件中的过程。
 >
-> ###### 为什么要引入 Core Dump ？
+> **为什么要引入 Core Dump ？**
 >
 > Core Dump 通常包含了程序执行时的内存快照、寄存器状态、堆栈信息等，用来帮助开发人员在发生错误时进行调试和排查问题。
 >
-> ###### Linux 什么时候由谁生成 Core Dump ？
+> **Linux 什么时候由谁生成 Core Dump ？**
 >
 > 在Linux中，当一个程序因为诸如段错误、内存访问违例等严重错误而崩溃时，操作系统会生成一个Core Dump文件。这个文件通常会被命名为`core`，保存在程序崩溃的当前工作目录下。
 >
 > 生成Core Dump文件的操作是由操作系统处理的，通常是通过内核提供的相关机制来实现的。在Linux中，可以通过配置 ulimit 和 /proc 文件系统中的一些参数来控制Core Dump文件的生成行为。
 >
-> ###### 怎么分析 Core Dump ？
+> **怎么分析 Core Dump ？**
 >
 > 分析Core Dump文件通常需要使用调试工具，比如GDB（GNU调试器）。通过加载Core Dump文件到GDB中，可以查看程序崩溃时的堆栈信息、寄存器状态等，并尝试重现并解决问题。
 
@@ -150,7 +148,7 @@ list # list 可简写为 l，容易与 1 看混，所以后续不用缩写
 p a # p 是 print 的缩写
 ```
 
-调用gdb
+**调用gdb调试**
 
 ```shell
 lc@dust:~/learning-c$ gdb ./test.out ./core.2379.1000.8.test.out.1715087801 
@@ -184,7 +182,7 @@ warning: Section `.reg-xstate/2379' in core file too small.
 3               c=a/b;
 ```
 
-此次warning可以暂时忽略不计
+> 此次warning可以暂时忽略不计
 
 ```shell
 # 列举帧信息

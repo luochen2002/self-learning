@@ -268,7 +268,7 @@ No symbol "c" in current context.
 
 ### 单步执行和跟踪函数调用
 
-**给出函数调试实例**
+**函数调试实例**
 
 ```c
 #include<stadio.h>
@@ -671,7 +671,7 @@ $6 = 13
 
 ### 断点
 
-**断点调试是实例**
+**断点调试实例**
 
 ```shell
 #include<stdio.h>
@@ -896,8 +896,7 @@ input=123456740
 $ gdb main
 ...
 (gdb) start
-Temporary breakpoint 1 at 0x804843d: file main.c, line 9.
-Starting program: /home/akaedu/main
+...
 
 Temporary breakpoint 1, main () at main.c:9
 9                    sum = 0;
@@ -985,10 +984,7 @@ $10 = 0 '\000'
 (gdb) delete breakpoints
 Delete all breakpoints? (y or n) y
 (gdb) start
-The program being debugged has been started already.
-Start it from the beginning? (y or n) y
-Temporary breakpoint 3 at 0x804843d: file main.c, line 9.
-Starting program: /home/akaedu/main
+...
 
 Temporary breakpoint 3, main () at main.c:9
 9                    sum = 0;
@@ -1082,13 +1078,123 @@ input=23
 
 ### 段错误
 
+如果程序运行时出现段错误，用`gdb`可以很容易定位到究竟是哪一行引发的段错误，例如这个小程序：
 
+**段错误调试示例一**
 
+```c
+#include <stdio.h>
 
+int main(void)
+{
+        int man = 0;
+        scanf("%d", man);
+        return 0;
+}
+```
 
+> 在编译时就会给出warring：
+>
+> main.c: In function ‘main’:
+> main.c:6:17: warning: format ‘%d’ expects argument of type ‘int *’, but argument 2 has type ‘int’ [-Wformat=]
+>     		6|				scanf("%d", man);
+>       		|							 ~^   \~\~\~
+>       		|							   |   |
+>       		|							   |   int
+>       		|								int *
 
+调试过程如下：
+
+```shell
+$gdb main
+...
+(gdb) r
+Starting program: /home/lc/learning-c/main 
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+123
+
+Program received signal SIGSEGV, Segmentation fault.
+0x00007ffff7c67149 in __vfscanf_internal (s=<optimized out>, format=<optimized out>, argptr=argptr@entry=0x7fffffffdda0, mode_flags=mode_flags@entry=2) at ./stdio-common/vfscanf-internal.c:1896
+1896	./stdio-common/vfscanf-internal.c: No such file or directory.
+(gdb) bt
+#0  0x00007ffff7c67149 in __vfscanf_internal (s=<optimized out>, format=<optimized out>, argptr=argptr@entry=0x7fffffffdda0, 
+    mode_flags=mode_flags@entry=2) at ./stdio-common/vfscanf-internal.c:1896
+#1  0x00007ffff7c62142 in __isoc99_scanf (format=<optimized out>) at ./stdio-common/isoc99_scanf.c:30
+#2  0x0000555555555175 in main () at main.c:6
+```
+
+在`gdb`中运行，遇到段错误会自动停下来，这时可以用命令查看当前执行到哪一行代码了。`gdb`显示段错误出现在`__vfscanf_internal`函数中，用`bt`命令可以看到这个函数是被我们的`scanf`函数调用的，所以是`scanf`这一行代码引发的段错误。仔细观察程序发现是`man`前面少了个`&`。
+
+继续调试上一节的程序，上一节最后提出修正Bug的方法是在循环中加上判断条件，如果不是数字就报错退出，不仅输入字母可以报错退出，输入超长的字符串也会报错退出。表面上看这个程序无论怎么运行都不出错了，但假如我们把`while (1)`循环去掉，每次执行程序只转换一个数：
+
+**段错误调试实例二**
+
+```c
+#include <stdio.h>
+
+int main(void)
+{
+	int sum = 0, i = 0;
+	char input[5];
+
+	scanf("%s", input);
+	for (i = 0; input[i] != '\0'; i++) {
+		if (input[i] < '0' || input[i] > '9') {
+			printf("Invalid input!\n");
+			sum = -1;
+			break;
+		}
+		sum = sum*10 + input[i] - '0';
+	}
+	printf("input=%d\n", sum);
+	return 0;
+}
+```
+
+然后输入一个超长的字符串，看看会发生什么：
+
+```shell
+$ ./main
+12345678
+input=12345678
+*** stack smashing detected ***: terminated
+Aborted (core dumped)
+```
+
+我们输入12345678，计算结果12345678都打印完了，却在最后爆出错误信息。准确地说这是另外一种形式的程序崩溃而不是段错误，不过我们可以按同样的方法用 **gdb** 调试看看:
+
+```shell
+$ gdb main
+...
+(gdb) r
+Starting program: /home/lc/learning-c/main 
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+12345678
+input=12345678
+*** stack smashing detected ***: terminated
+
+Program received signal SIGABRT, Aborted.
+__pthread_kill_implementation (no_tid=0, signo=6, threadid=140737353770816) at ./nptl/pthread_kill.c:44
+44	./nptl/pthread_kill.c: No such file or directory.
+(gdb) bt
+#0  __pthread_kill_implementation (no_tid=0, signo=6, threadid=140737353770816) at ./nptl/pthread_kill.c:44
+#1  __pthread_kill_internal (signo=6, threadid=140737353770816) at ./nptl/pthread_kill.c:78
+#2  __GI___pthread_kill (threadid=140737353770816, signo=signo@entry=6) at ./nptl/pthread_kill.c:89
+#3  0x00007ffff7c42476 in __GI_raise (sig=sig@entry=6) at ../sysdeps/posix/raise.c:26
+#4  0x00007ffff7c287f3 in __GI_abort () at ./stdlib/abort.c:79
+#5  0x00007ffff7c89676 in __libc_message (action=action@entry=do_abort, fmt=fmt@entry=0x7ffff7ddb92e "*** %s ***: terminated\n")
+    at ../sysdeps/posix/libc_fatal.c:155
+#6  0x00007ffff7d3659a in __GI___fortify_fail (msg=msg@entry=0x7ffff7ddb916 "stack smashing detected") at ./debug/fortify_fail.c:26
+#7  0x00007ffff7d36566 in __stack_chk_fail () at ./debug/stack_chk_fail.c:24
+#8  0x0000555555555291 in main () at main.c:19
+```
+
+**gdb** 指出，错误发生在第19行。可是这一行什么都没有啊，只有表示 `main` 函数结束的}括号。这可以算是一条规律， **如果某个函数的局部变量发生访问越界，有可能并不立即产生段错误，而是在函数返回时产生段错误** 。
 
 ## Related Linux Tutorials:
 
 * [How to Debug Bash Scripts](https://linuxconfig.org/how-to-debug-bash-scripts)
 * [GDB debugging tutorial for beginners](https://linuxconfig.org/gdb-debugging-tutorial-for-beginners)
+* http://akaedu.github.io/book/ch10.html

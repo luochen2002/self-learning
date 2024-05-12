@@ -262,7 +262,428 @@ No symbol "b" in current context.
 No symbol "c" in current context.
 ```
 
-上述可见，帧序号体现调用顺序，==帧序号越小==，表示其所在的==调用层次越深==
+上述可见，帧序号体现调用顺序，帧序号越小，表示其所在的调用层次越深
+
+## 详细分析
+
+### 单步执行和跟踪函数调用
+
+给出下述函数调试示例
+
+```c
+#include<stadio.h>
+int add_range(int low, int high){
+    int i, sum;
+    for(i = low; i <= high; i++)
+        sum = sum + i;
+    return sum;
+}
+
+int main(void){
+    int result[100];
+    result[0] = add_range(1, 10);
+    result[1] = add_range(1, 100);
+    printf("result[0]=%d\nresult[1]=%d\n", result[0], result[1]);
+    return 0;
+}
+```
+
+```c
+result[0]=55
+result[1]=5105
+```
+
+第一个结果正确，但第二个结果显然错误，既然第一个结果正确，那说明程序逻辑没有问题，我们应该怀疑是数据出了错，经验丰富的同学可以很快找出错误原因：局部变量`i`和`sum`没有初始化。那我们试试看用gdb来进行调试。
+
+在编译时需要加上`-g`选项，这样生成的可执行文件才能用gdb进行源码级调试，（详细请RTFM）
+
+```shell
+$ gcc -g main.c -o main
+$ gdb main
+Copyright (C) 2022 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+Type "show copying" and "show warranty" for details.
+This GDB was configured as "x86_64-linux-gnu".
+Type "show configuration" for configuration details.
+For bug reporting instructions, please see:
+<https://www.gnu.org/software/gdb/bugs/>.
+Find the GDB manual and other documentation resources online at:
+    <http://www.gnu.org/software/gdb/documentation/>.
+
+For help, type "help".
+Type "apropos word" to search for commands related to "word"...
+Reading symbols from main...
+(gdb)
+```
+
+> -g  
+>
+> Produce debugging information in the operating system's native format (stabs, COFF, XCOFF, or DWARF).  GDB can work with this debugging information.
+
+`-g`选项的作用是在可执行文件中加入源代码的信息，比如可执行文件中第几条机器指令对应源代码的第几行，但并不是把整个源文件嵌入到可执行文件中，所以在调试时必须保证gdb能找到源文件。gdb提供一个类似Shell的命令行环境，上面的`(gdb)`就是提示符，在这个提示符下输入`help`可以查看命令的类别：
+
+```shell
+(gdb) help
+List of classes of commands:
+
+aliases -- User-defined aliases of other commands.
+breakpoints -- Making program stop at certain points.
+data -- Examining data.
+files -- Specifying and examining files.
+internals -- Maintenance commands.
+obscure -- Obscure features.
+running -- Running the program.
+stack -- Examining the stack.
+status -- Status inquiries.
+support -- Support facilities.
+text-user-interface -- TUI is the GDB text based interface.
+tracepoints -- Tracing of program execution without stopping the program.
+user-defined -- User-defined commands.
+
+Type "help" followed by a class name for a list of commands in that class.
+Type "help all" for the list of all commands.
+Type "help" followed by command name for full documentation.
+Type "apropos word" to search for commands related to "word".
+Type "apropos -v word" for full documentation of commands related to "word".
+Command name abbreviations are allowed if unambiguous.
+```
+
+当然，也可以进一步查看某一类别中有哪些命令，例如查看files类别下有哪些命令可用：
+
+```shell
+(gdb) help files
+Specifying and examining files.
+
+List of commands:
+
+add-symbol-file -- Load symbols from FILE, assuming FILE has been dynamically loaded.
+add-symbol-file-from-memory -- Load the symbols out of memory from a dynamically loaded object file.
+cd -- Set working directory to DIR for debugger.
+core-file -- Use FILE as core dump for examining memory and registers.
+directory -- Add directory DIR to beginning of search path for source files.
+edit -- Edit specified file or function.
+exec-file -- Use FILE as program for getting contents of pure memory.
+file -- Use FILE as program to be debugged.
+forward-search, fo, search -- Search for regular expression (see regex(3)) from last line listed.
+generate-core-file, gcore -- Save a core file with the current state of the debugged process.
+list, l -- List specified function or line.
+load -- Dynamically load FILE into the running program.
+nosharedlibrary -- Unload all shared object library symbols.
+path -- Add directory DIR(s) to beginning of search path for object files.
+pwd -- Print working directory.
+remote -- Manipulate files on the remote system.
+remote delete -- Delete a remote file.
+remote get -- Copy a remote file to the local system.
+remote put -- Copy a local file to the remote system.
+remove-symbol-file -- Remove a symbol file added via the add-symbol-file command.
+reverse-search, rev -- Search backward for regular expression (see regex(3)) from last line listed.
+section -- Change the base address of section SECTION of the exec file to ADDR.
+sharedlibrary -- Load shared object library symbols for files matching REGEXP.
+symbol-file -- Load symbol table from executable file FILE.
+
+Type "help" followed by command name for full documentation.
+Type "apropos word" to search for commands related to "word".
+Type "apropos -v word" for full documentation of commands related to "word".
+Command name abbreviations are allowed if unambiguous.
+```
+
+试试用`list`命令从第一行开始列出源码
+
+```shell
+(gdb) list 1
+1	#include<stdio.h>
+2	
+3	int add_range(int low, int high){
+4		int i, sum;
+5		for(i = low; i <= high; i++)
+6			sum = sum + i;
+7		return sum;
+8	}
+9	
+10	int main(void){
+```
+
+> list [file:]function
+>            type the text of the program in the vicinity of where
+>            it is presently stopped.
+
+一次只列十行，若需要从11行开始继续列源码可以键入
+
+```shell
+(gdb) list
+```
+
+也可以直接敲回车（gdb提供功能：在提示符下直接敲回车表示重复上一行命令）
+
+```shell
+(gdb) <Enter>
+11		int result[100];
+12		result[0] = add_range(1, 10);
+13		result[1] = add_range(1, 100);
+14		printf("result[0]=%d\nesult[1]=%d\n", result[0], result[1]);
+15	
+16		return 0;
+17	}
+```
+
+gdb常用命令有简写形式，如`list`可简写为`l`，要列出一个函数的源码也可用函数名做参数：
+
+```shell
+(gdb) l add_range 
+1	#include<stdio.h>
+2	
+3	int add_range(int low, int high){
+4		int i, sum;
+5		for(i = low; i <= high; i++)
+6			sum = sum + i;
+7		return sum;
+8	}
+9	
+10	int main(void){
+```
+
+退出gdb调试环境：
+
+```shell
+(gdb) quit # or q
+```
+
+gdb的参数是可执行文件`main`，我们可以测试一下将源码改名或移动到其他地方再用gdb调试，这样就列不出源码了
+
+```shell
+$ mv main.c mian.c
+$ gdb main
+...
+(gdb) l
+1	main.c: No such file or directory.
+```
+
+由此可见，gcc的`-g`选项并不是把源码嵌入到可执行文件中，在调试时也需要源码。把源码恢复后我们继续调试。首先用`start`命令开始执行程序
+
+```shell
+(gdb) start
+Temporary breakpoint 1 at 0x11a5: file main.c, line 10.
+Starting program: /home/lc/learning-c/main 
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+
+Temporary breakpoint 1, main () at main.c:10
+10      int main(void){
+```
+
+>start
+>​	Start the debugged program stopping at the beginning of the main procedure.
+
+> run [arglist]
+>            Start your program (with arglist, if specified).
+
+> gdb调试器提供了多种方式来启动目标程序，其中最常用的就是`run`指令，其次为`start`指令。也就是说，`run`和`start`指令都可以用来在gdb调试器中启动程序，它们之间的区别是：
+>
+> 1、默认情况下，`run` 指令会一直执行程序，直到执行结束。如果程序中手动设置有断点，则`run`指令会执行程序至第一个断点处；
+>
+> 2、`start`指令会执行程序至 main() 主函数的起始位置，即在 main() 函数的第一行语句处停止执行（该行代码尚未执行）。
+>
+> 即：可以这样理解，使用`start`指令启动程序，完全等价于先在 main() 主函数起始位置设置一个断点，然后再使用`run`指令启动程序。另外，程序执行过程中使用`run`或者`start`指令，表示的是重新启动程序。
+
+gdb停在main函数中变量定义之后的第一条语句处等待我们发命令，gdb列出的这条语句是即将执行的下一条语句，我们可以使用`next`命令（or `n`）控制这些语句一条一条执行：
+
+```shell
+(gdb) n
+12              result[0] = add_range(1, 10);
+(gdb) <Enter>
+13              result[1] = add_range(1, 100);
+(gdb) <Enter>
+14              printf("result[0]=%d\nesult[1]=%d\n", result[0], result[1]);
+(gdb) <Enter>
+result[0]=55
+esult[1]=5105
+16              return 0;
+
+```
+
+> next
+>            Execute next program line (after stopping); step over
+>            any function calls in the line.
+
+用`n`命令依次执行两行赋值语句和一行打印语句，在执行打印语句时结果立刻打出来了，然后停在`return`语句之前等待我们发命令。虽然我们完全控制了程序的执行，但仍然看不出哪里错了，因为错误不在`main`函数中而在`add_range`函数中，现在用`start`命令重新来过，这次用`step`命令（简写为`s`）钻进`add_range`函数中去跟踪执行：
+
+```shell
+(gdb) start
+The program being debugged has been started already.
+Start it from the beginning? (y or n) y
+Temporary breakpoint 3 at 0x5555555551a5: file main.c, line 10.
+Starting program: /home/lc/learning-c/main 
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+
+Temporary breakpoint 3, main () at main.c:10
+10      int main(void){
+(gdb) n
+12              result[0] = add_range(1, 10);
+(gdb) s
+add_range (low=1, high=10) at main.c:5
+5               for(i = low; i <= high; i++)
+```
+
+> step
+>            Execute next program line (after stopping); step into
+>            any function calls in the line.
+
+这次停在了`add_range`函数中变量定义之后的第一条语句处。在函数中有几种查看状态的办法，`backtrace`命令（简写为`bt`）可以查看函数调用的栈帧：
+
+```shell
+(gdb) bt
+#0  add_range (low=1, high=10) at main.c:5
+#1  0x00005555555551c3 in main () at main.c:12
+```
+
+> bt 	Backtrace: display the program stack. 
+
+可见当前的`add_range`函数是被`main`函数调用的，`main`传进来的参数是`low=1, high=10`。`main`函数的栈帧编号为1，`add_range`的栈帧编号为0。现在可以用`info`命令（简写为`i`）查看`add_range`函数局部变量的值：
+
+```shell
+(gdb) i locals
+i = 0
+sum = 0
+```
+
+> info, inf, i
+> 	Generic command for showing things about the program being debugged.
+
+如果想查看`main`函数当前局部变量的值也可以做到，先用`frame`命令（简写为`f`）选择1号栈帧然后再查看局部变量：
+
+```shell
+(gdb) f 1
+#1  0x00005555555551c3 in main () at main.c:12
+12              result[0] = add_range(1, 10);
+(gdb) i locals
+result = {0 <repeats 28 times>, 16777216, 0, 32768, 0, 12582912, 0, 8, 0, 64, 0, 8, 0, 64, 0, 0, 0, -1, -1, 0, 0, 0, 0, 25, 80, 2, 
+  0, 6, -2147483648, 0 <repeats 14 times>, -134330144, 32767, 13, 0, 1, 0, 1, 0, 1, 0, 1431650368, 21845, -134338500, 32767, 3376, 
+  0, -7495, 32767, -134475776, 32767, 16777216, 257, 2, 0, 126614527, 0, -7479, 32767, 100, 0}
+```
+
+> frame, f
+> 	Select and print a stack frame.
+
+注意到`result`数组中有很多元素具有杂乱无章的值，我们知道未经初始化的局部变量具有不确定的值。到目前为止一切正常。用`s`或`n`往下走几步，然后用`print`命令（简写为`p`）打印出变量`sum`的值：
+
+```shell
+(gdb) s
+6                       sum = sum + i;
+(gdb) 
+5               for(i = low; i <= high; i++)
+(gdb) 
+6                       sum = sum + i;
+(gdb) 
+5               for(i = low; i <= high; i++)
+(gdb) p sum
+$1 = 3
+```
+
+> print expr
+> ​	Display the value of an expression.
+
+第一次循环`i`是1，第二次循环`i`是2，加起来是3，没错。这里的`$1`表示`gdb`保存着这些中间结果，`$`后面的编号会自动增长，在命令中可以用`$1`、`$2`、`$3`等编号代替相应的值。由于我们本来就知道第一次调用的结果是正确的，再往下跟也没意义了，可以用`finish`命令让程序一直运行到从当前函数返回为止：
+
+```shell
+(gdb) finish
+Run till exit from #0  add_range (low=1, high=10) at main.c:5
+main () at main.c:12
+12		result[0] = add_range(1, 10);
+Value returned is $2 = 55
+```
+
+返回值是55，当前正准备进行赋值操作，用s命令赋值，然后查看result数组：
+
+```shell
+(gdb) s
+13		result[1] = add_range(1, 100);
+(gdb) p result
+$3 = {55, 0 <repeats 23 times>, 12582912, 0, 2112, 0, 16777216, 0, 32768, 0, 
+  12582912, 0, 8, 0, 64, 0, 8, 0, 64, 0, 0, 0, -1, -1, 0, 0, 2, 0, 6, 
+  -2147483648, 0 <repeats 18 times>, -134330144, 32767, 13, 0, 1, 0, 1, 0, 1, 
+  0, 1431650368, 21845, -134338500, 32767, 3376, 0, -7383, 32767, -134475776, 
+  32767, 16777216, 257, 2, 0, 126614527, 0, -7367, 32767, 100, 0}
+```
+
+第一个值55确实赋给了`result`数组的第0个元素。下面用`s`命令进入第二次`add_range`调用，进入之后首先查看参数和局部变量：
+
+```shell
+(gdb) s
+add_range (low=1, high=100) at main.c:5
+5		for(i = low; i <= high; i++)
+(gdb) bt
+#0  add_range (low=1, high=100) at main.c:5
+#1  0x00005555555551d8 in main () at main.c:13
+(gdb) i locals
+i = 11
+sum = 55
+```
+
+由于局部变量`i`和`sum`没初始化，所以具有不确定的值，又由于两次调用是挨着的，`i`和`sum`正好取了上次调用时的值。`i`的初值不是0倒没关系，在`for`循环中会赋值为0的，但`sum`如果初值不是0，累加得到的结果就错了。好了，我们已经找到错误原因，可以退出`gdb`修改源代码了。如果我们不想浪费这次调试机会，可以在`gdb`中马上把`sum`的初值改为0继续运行，看看这一处改了之后还有没有别的Bug：
+
+```shell
+(gdb) set var sum=0
+(gdb) finish
+Run till exit from #0  add_range (low=1, high=100) at main.c:5
+main () at main.c:13
+13		result[1] = add_range(1, 100);
+Value returned is $4 = 5050
+(gdb) n
+14		printf("result[0]=%d\nesult[1]=%d\n", result[0], result[1]);
+(gdb) 
+result[0]=55
+esult[1]=5050
+16		return 0;
+```
+
+这样结果就对了。修改变量的值除了用`set`命令之外也可以用`print`命令，因为`print`命令后面跟的是表达式，而我们知道赋值和函数调用也都是表达式，所以也可以用`print`命令修改变量的值或者调用函数：
+
+```shell
+(gdb) p result[2]=33
+$5 = 33
+(gdb) p printf("result[2]=%d\n", result[2])
+result[2]=33
+$6 = 13
+```
+
+`printf`的返回值表示实际打印的字符数，所以`$6`的结果是13。
+
+总结一下本节用到的`gdb`命令：
+
+|        命令         |                          描述                          |
+| :-----------------: | :----------------------------------------------------: |
+|  backtrace（或bt）  |                 查看各级函数调用及参数                 |
+|       finish        |     连续运行到当前函数返回为止，然后停下来等待命令     |
+| frame（或f） 帧编号 |                        选择栈帧                        |
+| info（或i） locals  |                查看当前栈帧局部变量的值                |
+|     list（或l）     |      列出源代码，接着上次的位置往下列，每次列10行      |
+|      list 行号      |                列出从第几行开始的源代码                |
+|     list 函数名     |                  列出某个函数的源代码                  |
+|     next（或n）     |                     执行下一行语句                     |
+|    print（或p）     | 打印表达式的值，通过表达式可以修改变量的值或者调用函数 |
+|     quit（或q）     |                   退出`gdb`调试环境                    |
+|       set var       |                      修改变量的值                      |
+|        start        |   开始执行程序，停在`main`函数第一行语句前面等待命令   |
+|     step（或s）     |      执行下一行语句，如果有函数调用则进入到函数中      |
+
+### 断点
+
+
+
+### 观察点
+
+
+
+### 段错误
+
+
+
+
+
+
 
 ## Related Linux Tutorials:
 

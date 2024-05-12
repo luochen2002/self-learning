@@ -850,7 +850,235 @@ Breakpoint 4, main () at main.c:9
 
 ### 观察点
 
+> 由于本人机器
+> 变量`i`的地址为0x555555558018
+> `input`地址为0x55555555801c
+> 故无法还原该实验
 
+继续修改上一节的程序。经过调试我们得出结论，对于这个程序来说， `sum` 赋不赋初值不重要，重要的是在 `while (1)` 循环体的开头加上 `sum = 0;` ，这才能保证每次循环从0开始累加。我们把程序改成这样：
+
+```c
+#include <stdio.h>
+
+int sum = 0, i;
+char input[5];
+
+int main(void)
+{
+        while (1) {
+                sum = 0;
+                scanf("%s", input);
+                for (i = 0; input[i] != '\0'; i++)
+                        sum = sum*10 + input[i] - '0';
+                printf("input=%d\n", sum);
+        }
+        return 0;
+}
+```
+
+在这里我故意把 `sum` 、 `i` 、 `input` 定义成全局变量， `sum` 赋初值而 `i` 和 `input` 不赋初值，这是为了比较容易产生本节要讲的错误现象。可以先看[书](http://akaedu.github.io/book/ch10s03.html)，在理解了基本原理之后自己改改程序看能不能跑出类似的结果：变量定义在全局还是局部作用域，在定义时是否初赋了初值，这些都会影响变量所占的存储空间的位置，从而影响本程序的运行结果。
+
+使用 `scanf` 函数是非常凶险的，即使修正了上一节的Bug也还存在很多问题。如果输入的字符串超长了会怎么样？我们知道数组访问越界是不会被检查的，所以 `scanf` 会把 `input` 数组写越界。现象是这样的：
+
+```shell
+$ ./main
+1234
+input=1234
+1234567
+input=1234567
+12345678
+input=123456740
+```
+
+输入1234567其实已经访问越界了，但程序还能给出正确结果。而输入12345678时程序给出一个非常诡异的结果，下面我们用调试器看看这个诡异的结果是怎么出来的:
+
+```shell
+$ gdb main
+...
+(gdb) start
+Temporary breakpoint 1 at 0x804843d: file main.c, line 9.
+Starting program: /home/akaedu/main
+
+Temporary breakpoint 1, main () at main.c:9
+9                    sum = 0;
+(gdb) n
+10                   scanf("%s", input);
+(gdb) （直接回车）
+12345678
+11                   for (i = 0; input[i] != '\0'; i++)
+(gdb) p input
+$1 = "12345"
+```
+
+在这里 **gdb** 知道 `input` 数组的长度是5，所以用 `p` 命令查看时只显示5个字符。我们换一种办法查看就可以看到其实已经写越界了：
+
+```shell
+(gdb) p printf("%x %x %x %x %x %x %x %x %x\n", input[0], input[1], input[2], input[3], input[4], input[5], input[6], input[7], input[8])
+31 32 33 34 35 36 37 38 0
+$2 = 26
+```
+
+这条命令从 `input` 数组的第一个字节开始连续打印9个字节，打印的正是 `'1'` 到 `'8'` 的十六进制ASCII码，还有一个 `'\0'` ，所以 `scanf` 实际上写越界了四个字符：`'6'` 、 `'7'` 、 `'8'` 、 `'\0'` 。 `printf` 的转换说明 `%x` 表示按16进制打印。
+
+根据运行结果“123456740”，用户输入的前7个字符转成数字都没错，第8个错了，也就是 `i` 从0到6的循环都没错，我们设一个条件断点从 `i` 等于7开始单步调试：
+
+```shell
+(gdb) l
+6    int main(void)
+7    {
+8            while (1) {
+9                    sum = 0;
+10                   scanf("%s", input);
+11                   for (i = 0; input[i] != '\0'; i++)
+12                           sum = sum*10 + input[i] - '0';
+13                   printf("input=%d\n", sum);
+14           }
+15           return 0;
+(gdb) b 12 if i == 7
+Breakpoint 2 at 0x8048468: file main.c, line 12.
+(gdb) c
+Continuing.
+
+Breakpoint 2, main () at main.c:12
+12                           sum = sum*10 + input[i] - '0';
+(gdb) p sum
+$3 = 1234567
+```
+
+现在 `sum` 是1234567没错，我们推测即将进行的下一步计算肯定要出错，调试的结果出乎意料，下一步计算并没有出错：
+
+```shell
+(gdb) p input[i]
+$4 = 56 '8'
+(gdb) n
+11                   for (i = 0; input[i] != '\0'; i++)
+(gdb) p sum
+$5 = 12345678
+```
+
+`input[i]` 是 `'8'` ，减去 `'0'` 等于8，把 `sum` 的当前值1234567乘以10再加上8，确实得到了12345678。那为什么打印的结果却不是这一步算出的12345678呢？只有一个解释：这一步计算之后并没有跳出循环去执行 `printf` ，而是继续下一轮循环：
+
+```shell
+(gdb) n
+12                           sum = sum*10 + input[i] - '0';
+(gdb) p i
+$6 = 8
+(gdb) p input[i]
+$7 = 8 '\b'
+(gdb) n
+11                   for (i = 0; input[i] != '\0'; i++)
+(gdb) p sum
+$8 = 123456740
+(gdb) n
+13                   printf("input=%d\n", sum);
+(gdb) p i
+$9 = 9
+(gdb) p input[9]
+$10 = 0 '\000'
+```
+
+先前我们明明打印出 `input[8]` 是 `'\0'` ，什么时候变成 `'\b'` 的呢？这一变，循环的控制条件 `input[8] != '\0'`又得到满足了，原本应该跳出循环的，现在又进循环了，把sum累加成了12345678*10 + ‘b’ - ‘0’ = 123456740 （ `'\b'` 的ASCII码是8， `'0'` 的ASCII码是48）。然后 `input[9]` 确实是0，跳出循环，打印，终于得出了那个诡异的结果！
+
+现在我们要弄清楚 `input[8]` 到底是什么时候变的，可以用观察点（Watchpoint）来跟踪。我们知道断点是当程序执行到某一代码行时中断，而观察点是当程序访问某个存储单元时中断。如果我们不知道某个存储单元是被哪一行代码改动的，观察点就非常有用了。下面删除原来设的断点，从头执行程序，重复上次的输入，用 `watch` 命令设置观察点，跟踪 `input[8]` 的存储单元：
+
+```shell
+(gdb) delete breakpoints
+Delete all breakpoints? (y or n) y
+(gdb) start
+The program being debugged has been started already.
+Start it from the beginning? (y or n) y
+Temporary breakpoint 3 at 0x804843d: file main.c, line 9.
+Starting program: /home/akaedu/main
+
+Temporary breakpoint 3, main () at main.c:9
+9                    sum = 0;
+(gdb) n
+10                   scanf("%s", input);
+(gdb) （直接回车）
+12345678
+11                   for (i = 0; input[i] != '\0'; i++)
+(gdb) watch input[8]
+Hardware watchpoint 4: input[8]
+(gdb) i watchpoints
+Num     Type           Disp Enb Address    What
+4       hw watchpoint  keep y              input[8]
+(gdb) c
+Continuing.
+Hardware watchpoint 4: input[8]
+
+Old value = 0 '\000'
+New value = 1 '\001'
+0x0804849f in main () at main.c:11
+11                   for (i = 0; input[i] != '\0'; i++)
+(gdb) c
+Continuing.
+Hardware watchpoint 4: input[8]
+
+Old value = 1 '\001'
+New value = 2 '\002'
+0x0804849f in main () at main.c:11
+11                   for (i = 0; input[i] != '\0'; i++)
+```
+
+已经很明显了，每次都是回到 `for` 循环开头的时候改变了 `input[8]` 的值，而且是每次加1－－这不就是循环变量 `i` 么？原来循环变量 `i` 就位于 `input[8]` 的位置。 `input[5]` 、 `input[6]` 、 `input[7]` 虽然也是访问越界，但还不算严重，反正也没有别的变量占用这块存储空间，而 `input[8]` 这个访问越界就严重了，直接访问到变量 `i` 的头上了。其实用 `x` 命令可以清楚地看到这一点，只不过为了防止“剧透”我一开始没有这么做：
+
+```shell
+(gdb) x/12bx input
+0x804a024 <input>:   0x31    0x32    0x33    0x34    0x35    0x36    0x37    0x38
+0x804a02c <i>:       0x02    0x00    0x00    0x00
+```
+
+`x` 命令打印指定的存储单元里保存的内容，后缀 `8bx` 是打印格式，12表示打印12组，b表示每个字节一组，x表示按十六进制格式打印 ，我们可以看到在 `input` 的存储单元的起始位置加8个字节处正是变量 `i` 的存储单元。
+
+> 打印结果最左边的一长串数字是内存地址
+
+修正这个Bug对初学者来说有一定难度。如果你发现了这个Bug却没想到数组访问越界这一点，也许一时想不出原因，就会先去处理另外一个更容易修正的Bug：如果输入的不是数字而是字母或别的符号也能算出结果来，这显然是不对的，可以在循环中加上判断条件检查非法字符。
+
+```c
+while (1) {
+        sum = 0;
+        scanf("%s", input);
+        for (i = 0; input[i] != '\0'; i++) {
+                if (input[i] < '0' || input[i] > '9') {
+                        printf("Invalid input!\n");
+                        sum = -1;
+                        break;
+                }
+                sum = sum*10 + input[i] - '0';
+        }
+        printf("input=%d\n", sum);
+}
+```
+
+然后你会惊喜地发现，不仅输入字母会报错，输入超长也会报错：
+
+```shell
+$ ./main
+123a
+Invalid input!
+input=-1
+dead
+Invalid input!
+input=-1
+1234578
+Invalid input!
+input=-1
+1234567890abcdef
+Invalid input!
+input=-1
+23
+input=23
+```
+
+似乎是两个Bug一起解决掉了，但这是治标不治本的解决方法。看起来输入超长的错误是不出现了，但只要没有找到根本原因就不可能真的解决掉，等到条件一变，它可能又冒出来了，在下一节你会看到它又以一种新的形式冒出来了。现在请思考一下为什么加上检查非法字符的代码之后输入超长也会报错。
+
+最后总结一下本节用到的 **gdb** 命令：
+
+|          命令           |                             描述                             |
+| :---------------------: | :----------------------------------------------------------: |
+|          watch          |                          设置观察点                          |
+| info（或i） watchpoints |                   查看当前设置了哪些观察点                   |
+|            x            | 从某个位置开始打印存储单元的内容，全部当成字节来看，而不区分哪个字节属于哪个变量 |
 
 ### 段错误
 

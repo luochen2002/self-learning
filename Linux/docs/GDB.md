@@ -268,7 +268,7 @@ No symbol "c" in current context.
 
 ### 单步执行和跟踪函数调用
 
-给出下述函数调试示例
+**给出函数调试实例**
 
 ```c
 #include<stadio.h>
@@ -671,7 +671,182 @@ $6 = 13
 
 ### 断点
 
+**断点调试是实例**
 
+```shell
+#include<stdio.h>
+
+int main(){
+	int sum = 0, i = 0;
+	char input[5];
+	
+	while(1) {
+		scanf("%s", input);
+		for(i = 0; input[i] != '\0'; i++)
+			sum = sum * 10 + input[i] - '0';
+		printf("input=%d\n", sum);
+	}
+	return 0;
+}
+```
+
+该程序的作用是：首先从键盘读入一串数字存到字符数组`input`中，然后转换成整型存到`sum`中，然后打印出来，一直这样循环下去。`scanf("%s", input);`这个调用的功能是等待用户输入一个字符串并回车，`scanf`把其中第一段非空白（非空格、Tab、换行）的字符串保存到`input`数组中，并自动在末尾添加`'\0'`。接下来的循环从左到右扫描字符串并把每个数字累加到结果中，例如输入是`"2345"`，则循环累加的过程是`(((0*10+2)*10+3)*10+4)*10+5=2345`。注意字符型的`'2'`要减去`'0'`的ASCII码才能转换成整数值2。下面编译运行程序看看有什么问题：
+
+```shell
+$ gcc main.c -g -o main
+$ ./main 
+123
+input=123
+234
+input=123234
+^C		#(Ctrl-C退出程序)
+$
+```
+
+又是这种现象，第一次是对的，第二次就不对。可是这个程序我们并没有忘了赋初值，不仅`sum`赋了初值，连不必赋初值的i都赋了初值。读者先试试只看代码能不能看出错误原因。下面来调试：
+
+```shell
+$ gdb main
+...
+(gdb) start
+Temporary breakpoint 1 at 0x1175: file main.c, line 4.
+Starting program: /home/lc/learning-c/main 
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+
+Temporary breakpoint 1, main () at main.c:4
+4	{
+(gdb) n
+5            int sum = 0, i = 0;
+```
+
+有了上一次的经验，`sum`被列为重点怀疑对象，我们可以用`display`命令使得每次停下来的时候都显示当前`sum`的值，然后继续往下走：
+
+```shell
+(gdb) n
+9			scanf("%s", input);
+1: sum = 0
+(gdb) 
+123
+10			for (i = 0; input[i] != '\0'; i++)
+1: sum = 0
+```
+
+`undisplay` 命令可以取消跟踪显示，变量 `sum` 的编号是1，可以用 `undisplay 1` 命令取消它的跟踪显示。这个循环应该没有问题，因为上面第一次输入时打印的结果是正确的。如果不想一步一步走这个循环，可以用 `break` 命令（简写为 `b` ）在第9行设一个断点（Breakpoint）：
+
+```shell
+(gdb) l
+5		int sum = 0, i = 0;
+6		char input[5];
+7	
+8		while (1) {
+9			scanf("%s", input);
+10			for (i = 0; input[i] != '\0'; i++)
+11				sum = sum*10 + input[i] - '0';
+12			printf("input=%d\n", sum);
+13		}
+14		return 0;
+(gdb) b 9
+Breakpoint 2 at 0x555555555192: file main.c, line 9.
+```
+
+`break` 命令的参数也可以是函数名，表示在某个函数开头设断点。现在用 `continue` 命令（简写为 `c` ）连续运行而非单步运行，程序到达断点会自动停下来，这样就可以停在下一次循环的开头：
+
+```shell
+(gdb) c
+Continuing.
+input=123
+
+Breakpoint 2, main () at main.c:9
+9			scanf("%s", input);
+1: sum = 123
+```
+
+然后输入新的字符串准备转换：
+
+```shell
+(gdb) n
+234
+10			for (i = 0; input[i] != '\0'; i++)
+1: sum = 123
+```
+
+问题暴露出来了，新的转换应该再次从0开始累加，而 `sum` 现在已经是123了，原因在于新的循环没有把 `sum`归零。可见断点有助于快速跳过没有问题的代码，然后在有问题的代码上慢慢走慢慢分析，“断点加单步”是使用调试器的基本方法。至于应该在哪里设置断点，怎么知道哪些代码可以跳过而哪些代码要慢慢走，也要通过对错误现象的分析和假设来确定，以前我们用 `printf` 打印中间结果时也要分析应该在哪里插入 `printf` ，打印哪些中间结果，调试的基本思路是一样的。一次调试可以设置多个断点，用 `info` 命令可以查看已经设置的断点：
+
+```
+(gdb) b 12
+Breakpoint 3 at 0x5555555551eb: file main.c, line 12.
+(gdb) i breakpoints 
+Num     Type           Disp Enb Address            What
+2       breakpoint     keep y   0x0000555555555192 in main at main.c:9
+	breakpoint already hit 1 time
+3       breakpoint     keep y   0x00005555555551eb in main at main.c:12
+```
+
+每个断点都有一个编号，可以用编号指定删除某个断点：
+
+```shell
+(gdb) delete breakpoints 2
+(gdb) i breakpoints 
+Num     Type           Disp Enb Address            What
+3       breakpoint     keep y   0x00005555555551eb in main at main.c:12
+```
+
+有时候一个断点暂时不用可以禁用掉而不必删除，这样以后想用的时候可以直接启用，而不必重新从代码里找应该在哪一行设断点：
+
+```shell
+(gdb) disable breakpoints 3
+(gdb) i breakpoints 
+Num     Type           Disp Enb Address            What
+3       breakpoint     keep n   0x00005555555551eb in main at main.c:12
+(gdb) enable 3
+(gdb) i breakpoints 
+Num     Type           Disp Enb Address            What
+3       breakpoint     keep y   0x00005555555551eb in main at main.c:12
+(gdb) delete breakpoints 
+Delete all breakpoints? (y or n) y
+(gdb) i breakpoints 
+No breakpoints or watchpoints.
+```
+
+**gdb** 的断点功能非常灵活，还可以设置断点在满足某个条件时才激活，例如我们仍然在循环开头设置断点，但是仅当 `sum` 不等于0时才中断，然后用 `run` 命令（简写为 `r` ）重新从程序开头连续运行：
+
+```shell
+(gdb) break 9 if sum != 0
+Breakpoint 4 at 0x555555555192: file main.c, line 9.
+(gdb) i breakpoints 
+Num     Type           Disp Enb Address            What
+4       breakpoint     keep y   0x0000555555555192 in main at main.c:9
+	stop only if sum != 0
+(gdb) r
+The program being debugged has been started already.
+Start it from the beginning? (y or n) y
+Starting program: /home/lc/learning-c/main 
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+123
+input=123
+
+Breakpoint 4, main () at main.c:9
+9			scanf("%s", input);
+1: sum = 123
+```
+
+结果是第一次执行`scanf`之前没有中断，第二次却中断了。总结一下本节用到的`gdb`命令：
+
+| 命令                       | 描述                                     |
+| -------------------------- | ---------------------------------------- |
+| break（或b） 行号          | 在某一行设置断点                         |
+| break 函数名               | 在某个函数开头设置断点                   |
+| break ... if ...           | 设置条件断点                             |
+| continue（或c）            | 从当前位置开始连续运行程序               |
+| delete breakpoints 断点号  | 删除断点                                 |
+| display 变量名             | 跟踪查看某个变量，每次停下来都显示它的值 |
+| disable breakpoints 断点号 | 禁用断点                                 |
+| enable 断点号              | 启用断点                                 |
+| info（或i） breakpoints    | 查看当前设置了哪些断点                   |
+| run（或r）                 | 从头开始连续运行程序                     |
+| undisplay 跟踪显示号       | 取消跟踪显示                             |
 
 ### 观察点
 

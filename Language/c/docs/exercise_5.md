@@ -1,5 +1,7 @@
 ## 示例
 
+手动输入这段代码并运行它
+
 ```c
 #include <stdio.h>
 
@@ -15,7 +17,7 @@ int main(int argc, char *argv[])
 }
 ```
 
-手动输入这段代码并运行它，之后确保在`Valgrind`下不出现任何错误。你可能不会这样做，但你得习惯它。
+之后确保在`Valgrind`下不出现任何错误。你可能不会这样做，但你得习惯它。
 
 ```shell
 valgrind: ex5: command not found

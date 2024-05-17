@@ -105,6 +105,78 @@ C中所有bug的大多数来源都是忘了预留出足够的空间，或者忘�
 
 试着想出一些其它的办法让它崩溃，并且在`Valgrind`下像往常一样运行这个程序，你可以看到具体发生了什么，以及错误叫什么名字。有时`Valgrind`并不能发现你犯的错误，则需要移动声明这些变量的地方看看是否能找出错误。这是C的黑魔法的一部分，有时变量的位置会改变bug。
 
+```c
+// 使用指针给name[3]赋值
+int *ptr;
+ptr = &name[3];
+*ptr = 'A';
+```
+
+```shell
+// 编译时显示
+test.c:9:13: warning: assignment to ‘int *’ from incompatible pointer type ‘char *’
+```
+
+```
+// 输出显示
+name each: a   A
+name: a
+// Valgrind报告错误
+*** stack smashing detected ***: terminated
+==3352== 
+==3352== Process terminating with default action of signal 6 (SIGABRT): dumping core
+==3352==    at 0x49069FC: __pthread_kill_implementation (pthread_kill.c:44)
+==3352==    by 0x49069FC: __pthread_kill_internal (pthread_kill.c:78)
+==3352==    by 0x49069FC: pthread_kill@@GLIBC_2.34 (pthread_kill.c:89)
+==3352==    by 0x48B2475: raise (raise.c:26)
+==3352==    by 0x48987F2: abort (abort.c:79)
+==3352==    by 0x48F9675: __libc_message (libc_fatal.c:155)
+==3352==    by 0x49A6599: __fortify_fail (fortify_fail.c:26)
+==3352==    by 0x49A6565: __stack_chk_fail (stack_chk_fail.c:24)
+==3352==    by 0x109359: main (test.c:57)
+==3352== 
+==3352== HEAP SUMMARY:
+==3352==     in use at exit: 1,024 bytes in 1 blocks
+==3352==   total heap usage: 1 allocs, 0 frees, 1,024 bytes allocated
+==3352== 
+==3352== LEAK SUMMARY:
+==3352==    definitely lost: 0 bytes in 0 blocks
+==3352==    indirectly lost: 0 bytes in 0 blocks
+==3352==      possibly lost: 0 bytes in 0 blocks
+==3352==    still reachable: 1,024 bytes in 1 blocks
+==3352==         suppressed: 0 bytes in 0 blocks
+==3352== Rerun with --leak-check=full to see details of leaked memory
+==3352== 
+==3352== For lists of detected and suppressed errors, rerun with: -s
+==3352== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)
+Aborted (core dumped)
+```
+
+`stack smashing detected`这是一种堆栈溢出错误。通常表示在程序中发生了缓冲区溢出，导致堆栈被破坏，从而触发了堆栈保护机制。
+
+在Valgrind的LEAK SUMMARY中，显示1024字节的堆内存仍可达，我们看HEAP SUMMARY分配了1024字节，说明该内存没有被释放，从而导致了可达内存块。按照提示我们使用`--leak-check=full`看看
+
+```
+==3388== LEAK SUMMARY:
+==3388==    definitely lost: 0 bytes in 0 blocks
+==3388==    indirectly lost: 0 bytes in 0 blocks
+==3388==      possibly lost: 0 bytes in 0 blocks
+==3388==    still reachable: 1,024 bytes in 1 blocks
+==3388==         suppressed: 0 bytes in 0 blocks
+```
+
+遇到问题记得RTFM，在[Valgrind FAQ](https://valgrind.org/docs/manual/faq.html#faq.deflost)可以找到相关信息。
+
+- "definitely lost" means your program is leaking memory -- fix those leaks!
+- "indirectly lost" means your program is leaking memory in a pointer-based structure. (E.g. if the root node of a binary tree is "definitely lost", all the children will be "indirectly lost".) If you fix the "definitely lost" leaks, the "indirectly lost" leaks should go away.
+- "possibly lost" means your program is leaking memory, unless you're doing unusual things with pointers that could cause them to point into the middle of an allocated block; see the user manual for some possible causes. Use `--show-possibly-lost=no` if you don't want to see these reports.
+- "still reachable" means your program is probably ok -- it didn't free some memory it could have. This is quite common and often reasonable. Don't use `--show-reachable=yes` if you don't want to see these reports.
+- "suppressed" means that a leak error has been suppressed. There are some suppressions in the default suppression files. You can ignore suppressed errors.
+
+`still reachable`：可以访问，未丢失但也未释放。如果程序是正常结束的，那么它可能不会造成程序崩溃，但长时间运行有可能耗尽系统资源，因此建议修复它。如果程序是崩溃（如访问非法的地址而崩溃）而非正常结束的，则应当暂时忽略它，先修复导致程序崩溃的错误，然后重新检测。
+
+> 希望编写的程序都能：no leaks, no errors
+
 ## 附加题
 
 - 将一些字符赋给`numbers`的元素，之后用`printf`一次打印一个字符，你会得到什么编译器警告？

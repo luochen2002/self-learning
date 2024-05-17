@@ -58,3 +58,6 @@ grep [参数] 关键字 文件列表
 ## 超好的Tutorial
 
 [The Missing Semester of Your CS Education](https://missing.csail.mit.edu/)（配有中文版教程，墙裂推荐）
+
+[Linux101](https://101.ustclug.org/Ch01/)（由中国科学技术大学 Linux 用户协会发起）
+
